@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pose Detection</title>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; }
+        video, canvas { max-width: 100%; height: auto; }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay></video>
+    <canvas id="canvas"></canvas>
+    <script type="module">
+        import { PoseLandmarker, FilesetResolver, DrawingUtils } from 'https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0';
+
+        function lineEquation(x1, y1, x2, y2) {
+            const k = (y2 - y1) / (x2 - x1);
+            const b = y2 - k * x2;
+            return { k, b };
+        }
+
+        function intersectionPoint(k1, b1, k2, b2) {
+            const x = (b2 - b1) / (k1 - k2);
+            const y = k1 * x + b1;
+            return { x, y };
+        }
+
+        function calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky) {
+            try {
+                const leftLine = lineEquation(lhx, lhy, lkx, lky);
+                const rightLine = lineEquation(rhx, rhy, rkx, rky);
+                const intersection = intersectionPoint(leftLine.k, leftLine.b, rightLine.k, rightLine.b);
+                const x = intersection.x;
+                const y = intersection.y;
+                const ll = Math.sqrt((x - lkx)**2 + (y - lky)**2);
+                const rl = Math.sqrt((x - rkx)**2 + (y - rky)**2);
+                const dist = Math.sqrt((rkx - lkx)**2 + (rky - lky)**2);
+                const alpha = (dist**2 - rl**2 - ll**2) / (-2 * ll * rl);
+                const angle = Math.acos(alpha) * (180 / Math.PI);
+                return angle;
+            } catch (error) {
+                console.error('Error calculating angle:', error);
+                return null;
+            }
+        }
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const constraints = {
+            video: { facingMode: "environment" }
+        };
+
+        navigator.mediaDevices.getUserMedia(constraints)
+            .then(stream => {
+                video.srcObject = stream;
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    startDetection();
+                });
+            })
+            .catch(error => {
+                console.error('Error accessing camera:', error);
+            });
+
+        let poseLandmarker;
+
+        async function initializePoseLandmarker() {
+            const filesetResolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
+            poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
+                baseOptions: {
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+                },
+                runningMode: 'VIDEO',
+                numPoses: 1
+            });
+        }
+
+        async function detectPose() {
+            if (!poseLandmarker) return;
+            const detections = await poseLandmarker.detectForVideo(video, performance.now());
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            if (detections.poseLandmarks && detections.poseLandmarks.length > 0) {
+                const landmarks = detections.poseLandmarks[0];
+                const leftHip = landmarks[23];
+                const leftKnee = landmarks[25];
+                const rightHip = landmarks[24];
+                const rightKnee = landmarks[26];
+                if (leftHip && leftKnee && rightHip && rightKnee) {
+                    const lhx = leftHip.x * canvas.width;
+                    const lhy = leftHip.y * canvas.height;
+                    const lkx = leftKnee.x * canvas.width;
+                    const lky = leftKnee.y * canvas.height;
+                    const rhx = rightHip.x * canvas.width;
+                    const rhy = rightHip.y * canvas.height;
+                    const rkx = rightKnee.x * canvas.width;
+                    const rky = rightKnee.y * canvas.height;
+                    const angle = calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky);
+                    if (angle !== null) {
+                        ctx.font = '30px Arial';
+                        ctx.fillStyle = 'red';
+                        ctx.fillText(`Angle: ${angle.toFixed(2)} deg`, 50, 50);
+                    }
+                    [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
+                        ctx.beginPath();
+                        ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = 'green';
+                        ctx.fill();
+                    });
+                }
+            }
+            requestAnimationFrame(detectPose);
+        }
+
+        async function startDetection() {
+            await initializePoseLandmarker();
+            detectPose();
+        }
+    </script>
+</body>
+</html>
