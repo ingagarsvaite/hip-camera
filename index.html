@@ -2,19 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Added important viewport meta tag for iOS -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Added apple-specific meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Pose Detection</title>
     <style>
         body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: Arial, sans-serif; }
-        #video-container { position: relative; max-width: 100%; }
-        video { max-width: 100%; height: auto; display: block; }
+        #video-container { position: relative; width: 100%; max-width: 100%; }
+        video { width: 100%; height: auto; display: block; transform: rotateY(180deg); /* Mirror effect */ }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
         #angle-display { margin-top: 10px; font-size: 24px; color: red; }
+        #permission-message { 
+            display: none; 
+            padding: 20px; 
+            background: #ffeb3b; 
+            border-radius: 5px; 
+            margin: 20px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
+    <div id="permission-message">
+        Please allow camera access to use this application.
+        <br><br>
+        <button id="retry-button">Retry Camera Access</button>
+    </div>
     <div id="video-container">
-        <video id="video" autoplay></video>
+        <video id="video" playsinline autoplay muted></video>
         <canvas id="canvas"></canvas>
     </div>
     <div id="angle-display">Angle: XX deg</div>
@@ -56,28 +73,48 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const angleDisplay = document.getElementById('angle-display');
+        const permissionMessage = document.getElementById('permission-message');
+        const retryButton = document.getElementById('retry-button');
 
-        const constraints = {
-            video: { 
-                facingMode: "environment",
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            }
-        };
+        // iOS requires user interaction to start video
+        function initCamera() {
+            const constraints = {
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
 
-        navigator.mediaDevices.getUserMedia(constraints)
-            .then(stream => {
-                video.srcObject = stream;
-                video.addEventListener('loadedmetadata', () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    startDetection();
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(stream => {
+                    permissionMessage.style.display = 'none';
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        startDetection();
+                    };
+                })
+                .catch(error => {
+                    console.error('Error accessing camera:', error);
+                    angleDisplay.textContent = 'Camera Error';
+                    permissionMessage.style.display = 'block';
                 });
-            })
-            .catch(error => {
-                console.error('Error accessing camera:', error);
-                angleDisplay.textContent = 'Camera Error';
-            });
+        }
+
+        // Wait for user interaction on iOS
+        retryButton.addEventListener('click', initCamera);
+        
+        // Try to initialize on page load (works on desktop)
+        document.addEventListener('DOMContentLoaded', () => {
+            // iOS requires direct user interaction, so we'll show the permission message first
+            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                permissionMessage.style.display = 'block';
+            } else {
+                initCamera();
+            }
+        });
 
         let poseLandmarker;
 
@@ -95,42 +132,51 @@
         }
 
         async function detectPose() {
-            if (!poseLandmarker) return;
-            const detections = await poseLandmarker.detectForVideo(video, performance.now());
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (detections.landmarks && detections.landmarks.length > 0) {
-                const landmarks = detections.landmarks[0];
-                const leftHip = landmarks[23];
-                const leftKnee = landmarks[25];
-                const rightHip = landmarks[24];
-                const rightKnee = landmarks[26];
-                if (leftHip && leftKnee && rightHip && rightKnee) {
-                    const lhx = leftHip.x * canvas.width;
-                    const lhy = leftHip.y * canvas.height;
-                    const lkx = leftKnee.x * canvas.width;
-                    const lky = leftKnee.y * canvas.height;
-                    const rhx = rightHip.x * canvas.width;
-                    const rhy = rightHip.y * canvas.height;
-                    const rkx = rightKnee.x * canvas.width;
-                    const rky = rightKnee.y * canvas.height;
-                    const angle = calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky);
-                    if (angle !== null) {
-                        angleDisplay.textContent = `Angle: ${angle.toFixed(2)} deg`;
+            if (!poseLandmarker || !video.videoWidth) return;
+            
+            try {
+                const detections = await poseLandmarker.detectForVideo(video, performance.now());
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (detections.landmarks && detections.landmarks.length > 0) {
+                    const landmarks = detections.landmarks[0];
+                    const leftHip = landmarks[23];
+                    const leftKnee = landmarks[25];
+                    const rightHip = landmarks[24];
+                    const rightKnee = landmarks[26];
+                    
+                    if (leftHip && leftKnee && rightHip && rightKnee) {
+                        const lhx = leftHip.x * canvas.width;
+                        const lhy = leftHip.y * canvas.height;
+                        const lkx = leftKnee.x * canvas.width;
+                        const lky = leftKnee.y * canvas.height;
+                        const rhx = rightHip.x * canvas.width;
+                        const rhy = rightHip.y * canvas.height;
+                        const rkx = rightKnee.x * canvas.width;
+                        const rky = rightKnee.y * canvas.height;
+                        const angle = calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky);
+                        
+                        angleDisplay.textContent = angle !== null 
+                            ? `Angle: ${angle.toFixed(2)} deg` 
+                            : 'Angle: N/A';
+                            
+                        [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
+                            ctx.beginPath();
+                            ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
+                            ctx.fillStyle = 'green';
+                            ctx.fill();
+                        });
                     } else {
-                        angleDisplay.textContent = 'Angle: N/A';
+                        angleDisplay.textContent = 'No landmarks detected';
                     }
-                    [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
-                        ctx.beginPath();
-                        ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
-                        ctx.fillStyle = 'green';
-                        ctx.fill();
-                    });
                 } else {
-                    angleDisplay.textContent = 'No landmarks detected';
+                    angleDisplay.textContent = 'No pose detected';
                 }
-            } else {
-                angleDisplay.textContent = 'No pose detected';
+            } catch (error) {
+                console.error('Detection error:', error);
+                angleDisplay.textContent = 'Detection error';
             }
+            
             requestAnimationFrame(detectPose);
         }
 
@@ -141,5 +187,3 @@
     </script>
 </body>
 </html>
-
-<!-- hey -->
