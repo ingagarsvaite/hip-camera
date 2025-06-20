@@ -5,13 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pose Detection</title>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center; }
-        video, canvas { max-width: 100%; height: auto; }
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; font-family: Arial, sans-serif; }
+        #video-container { position: relative; max-width: 100%; }
+        video { max-width: 100%; height: auto; display: block; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #angle-display { margin-top: 10px; font-size: 24px; color: red; }
     </style>
 </head>
 <body>
-    <video id="video" autoplay></video>
-    <canvas id="canvas"></canvas>
+    <div id="video-container">
+        <video id="video" autoplay></video>
+        <canvas id="canvas"></canvas>
+    </div>
+    <div id="angle-display">Angle: XX deg</div>
     <script type="module">
         import { PoseLandmarker, FilesetResolver, DrawingUtils } from 'https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0';
 
@@ -49,9 +55,14 @@
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
+        const angleDisplay = document.getElementById('angle-display');
 
         const constraints = {
-            video: { facingMode: "environment" }
+            video: { 
+                facingMode: "environment",
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            }
         };
 
         navigator.mediaDevices.getUserMedia(constraints)
@@ -65,6 +76,7 @@
             })
             .catch(error => {
                 console.error('Error accessing camera:', error);
+                angleDisplay.textContent = 'Camera Error';
             });
 
         let poseLandmarker;
@@ -76,7 +88,9 @@
                     modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
                 },
                 runningMode: 'VIDEO',
-                numPoses: 1
+                numPoses: 1,
+                minPoseDetectionConfidence: 0.45,
+                minTrackingConfidence: 0.45
             });
         }
 
@@ -84,9 +98,8 @@
             if (!poseLandmarker) return;
             const detections = await poseLandmarker.detectForVideo(video, performance.now());
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            if (detections.poseLandmarks && detections.poseLandmarks.length > 0) {
-                const landmarks = detections.poseLandmarks[0];
+            if (detections.landmarks && detections.landmarks.length > 0) {
+                const landmarks = detections.landmarks[0];
                 const leftHip = landmarks[23];
                 const leftKnee = landmarks[25];
                 const rightHip = landmarks[24];
@@ -102,9 +115,9 @@
                     const rky = rightKnee.y * canvas.height;
                     const angle = calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky);
                     if (angle !== null) {
-                        ctx.font = '30px Arial';
-                        ctx.fillStyle = 'red';
-                        ctx.fillText(`Angle: ${angle.toFixed(2)} deg`, 50, 50);
+                        angleDisplay.textContent = `Angle: ${angle.toFixed(2)} deg`;
+                    } else {
+                        angleDisplay.textContent = 'Angle: N/A';
                     }
                     [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
                         ctx.beginPath();
@@ -112,7 +125,11 @@
                         ctx.fillStyle = 'green';
                         ctx.fill();
                     });
+                } else {
+                    angleDisplay.textContent = 'No landmarks detected';
                 }
+            } else {
+                angleDisplay.textContent = 'No pose detected';
             }
             requestAnimationFrame(detectPose);
         }
