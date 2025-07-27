@@ -1,30 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="lt">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Pose Detection</title>
+    <title>Kūno pozos analizė</title>
     <style>
-        body { 
-            margin: 0; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            font-family: Arial, sans-serif; 
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             background: #f5f5f5;
         }
         #container {
             width: 100%;
             max-width: 500px;
             margin: 20px auto;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
         }
-        #video-container { 
-            position: relative; 
+        #video-container {
+            position: relative;
             width: 100%;
             max-width: 400px;
             margin: 0 auto;
@@ -33,33 +30,42 @@
             overflow: hidden;
             background: #000;
         }
-        video { 
-            width: 100%; 
-            height: auto; 
-            display: block; 
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
         }
-        canvas { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
         }
-        #angle-display { 
-            margin: 15px 0;
-            padding: 10px 20px;
-            font-size: 20px; 
-            color: white;
+        #info-panel {
+            margin-top: 15px;
+            padding: 15px;
             background: #333;
-            border-radius: 20px;
-            text-align: center;
-            min-width: 200px;
+            border-radius: 8px;
+            color: white;
+            width: 100%;
+            max-width: 400px;
         }
-        #permission-message { 
-            display: none; 
-            padding: 20px; 
-            background: #ffeb3b; 
-            border-radius: 5px; 
+        #angle-display {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+        #landmark-data {
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        #permission-message {
+            display: none;
+            padding: 20px;
+            background: #ffeb3b;
+            border-radius: 5px;
             margin: 20px;
             text-align: center;
             max-width: 400px;
@@ -74,109 +80,179 @@
             font-size: 16px;
             cursor: pointer;
         }
-        #landmark-coords {
-            margin-top: 10px;
-            padding: 10px;
-            background: #f0f0f0;
-            border-radius: 5px;
-            font-family: monospace;
-            max-width: 100%;
-            overflow-x: auto;
-        }
     </style>
 </head>
 <body>
     <div id="container">
         <div id="permission-message">
-            Please allow camera access to use this application.
+            Prašome leisti kameros prieigą norint naudoti programą.
             <br><br>
-            <button id="retry-button">Enable Camera</button>
+            <button id="retry-button">Bandyti vėl</button>
         </div>
         <div id="video-container">
             <video id="video" playsinline autoplay muted></video>
             <canvas id="canvas"></canvas>
         </div>
-        <div id="angle-display">Angle: XX°</div>
-        <div id="landmark-coords">Landmark coordinates will appear here</div>
+        <div id="info-panel">
+            <div id="angle-display">Kampas: XX°</div>
+            <div id="landmark-data">Taškų koordinatės:\n- LK: X:XX, Y:XX\n- DK: X:XX, Y:XX\n- LS: X:XX, Y:XX\n- DS: X:XX, Y:XX</div>
+        </div>
     </div>
 
     <script type="module">
-        import { PoseLandmarker, FilesetResolver } from 'https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0';
+        import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/+esm';
 
-        // Landmark indices (MediaPipe Pose landmarks)
-        const LANDMARK_INDICES = {
-            LEFT_HIP: 23,
-            LEFT_KNEE: 25,
-            RIGHT_HIP: 24,
-            RIGHT_KNEE: 26
+        // Mus dominantys kūno taškai (MediaPipe numeracija)
+        const LANDMARKS = {
+            LEFT_HIP: 23,      // Kairės klubas
+            RIGHT_HIP: 24,      // Dešinės klubas
+            LEFT_KNEE: 25,      // Kairės kelis
+            RIGHT_KNEE: 26      // Dešinės kelis
         };
 
-        function lineEquation(x1, y1, x2, y2) {
-            const k = (y2 - y1) / (x2 - x1);
-            const b = y2 - k * x2;
-            return { k, b };
-        }
-
-        function intersectionPoint(k1, b1, k2, b2) {
-            const x = (b2 - b1) / (k1 - k2);
-            const y = k1 * x + b1;
-            return { x, y };
-        }
-
-        function calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky) {
-            try {
-                const leftLine = lineEquation(lhx, lhy, lkx, lky);
-                const rightLine = lineEquation(rhx, rhy, rkx, rky);
-                const intersection = intersectionPoint(leftLine.k, leftLine.b, rightLine.k, rightLine.b);
-                const x = intersection.x;
-                const y = intersection.y;
-                const ll = Math.sqrt((x - lkx)**2 + (y - lky)**2);
-                const rl = Math.sqrt((x - rkx)**2 + (y - rky)**2);
-                const dist = Math.sqrt((rkx - lkx)**2 + (rky - lky)**2);
-                const alpha = (dist**2 - rl**2 - ll**2) / (-2 * ll * rl);
-                const angle = Math.acos(alpha) * (180 / Math.PI);
-                return angle;
-            } catch (error) {
-                console.error('Error calculating angle:', error);
-                return null;
-            }
-        }
-
+        // Kameros inicijavimas
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const angleDisplay = document.getElementById('angle-display');
-        const coordDisplay = document.getElementById('landmark-coords');
+        const landmarkData = document.getElementById('landmark-data');
         const permissionMessage = document.getElementById('permission-message');
         const retryButton = document.getElementById('retry-button');
         const videoContainer = document.getElementById('video-container');
 
-        function initCamera() {
-            const constraints = {
-                video: { 
-                    facingMode: "environment", // Force rear camera
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
-            };
-
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(stream => {
-                    permissionMessage.style.display = 'none';
-                    video.srcObject = stream;
-                    video.onloadedmetadata = () => {
-                        canvas.width = videoContainer.clientWidth;
-                        canvas.height = videoContainer.clientWidth * (video.videoHeight / video.videoWidth);
-                        startDetection();
-                    };
-                })
-                .catch(error => {
-                    console.error('Error accessing camera:', error);
-                    angleDisplay.textContent = 'Camera Error - Please Enable Access';
-                    permissionMessage.style.display = 'block';
-                });
+        // Kampo skaičiavimo funkcija
+        function calculateAngle(A, B, C) {
+            // A-B-C kampas (taškuose)
+            const AB = [B.x - A.x, B.y - A.y];
+            const CB = [B.x - C.x, B.y - C.y];
+            
+            const dotProduct = AB[0] * CB[0] + AB[1] * CB[1];
+            const magnitudeAB = Math.sqrt(AB[0] ** 2 + AB[1] ** 2);
+            const magnitudeCB = Math.sqrt(CB[0] ** 2 + CB[1] ** 2);
+            
+            const angle = Math.acos(dotProduct / (magnitudeAB * magnitudeCB));
+            return angle * (180 / Math.PI);
         }
 
+        // Kameros paleidimas
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: "environment", // Priverstinai galinė kamera
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                
+                video.srcObject = stream;
+                permissionMessage.style.display = 'none';
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = videoContainer.clientWidth;
+                    canvas.height = videoContainer.clientWidth * (video.videoHeight / video.videoWidth);
+                    startDetection();
+                };
+            } catch (error) {
+                console.error('Kameros klaida:', error);
+                permissionMessage.style.display = 'block';
+                angleDisplay.textContent = 'Klaida: Nepavyko pasiekti kameros';
+            }
+        }
+
+        // Poza aptikimas
+        let poseLandmarker;
+        async function initializePoseLandmarker() {
+            const vision = await FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
+            );
+            
+            poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+                    delegate: 'GPU'
+                },
+                runningMode: 'VIDEO',
+                numPoses: 1,
+                minPoseDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+        }
+
+        // Atnaujinti taškų koordinates
+        function updateLandmarkInfo(landmarks) {
+            const info = {
+                leftHip: landmarks[LANDMARKS.LEFT_HIP],
+                rightHip: landmarks[LANDMARKS.RIGHT_HIP],
+                leftKnee: landmarks[LANDMARKS.LEFT_KNEE],
+                rightKnee: landmarks[LANDMARKS.RIGHT_KNEE]
+            };
+            
+            let text = "Taškų koordinatės:\n";
+            text += `- Kairės klubas: X:${info.leftHip.x.toFixed(4)}, Y:${info.leftHip.y.toFixed(4)}\n`;
+            text += `- Dešinės klubas: X:${info.rightHip.x.toFixed(4)}, Y:${info.rightHip.y.toFixed(4)}\n`;
+            text += `- Kairės kelis: X:${info.leftKnee.x.toFixed(4)}, Y:${info.leftKnee.y.toFixed(4)}\n`;
+            text += `- Dešinės kelis: X:${info.rightKnee.x.toFixed(4)}, Y:${info.rightKnee.y.toFixed(4)}`;
+            
+            landmarkData.textContent = text;
+            return info;
+        }
+
+        // Braižyti taškus
+        function drawLandmarks(landmarks) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Braižome tik 4 mus dominančius taškus
+            Object.values(LANDMARKS).forEach(index => {
+                const landmark = landmarks[index];
+                if (landmark) {
+                    const x = landmark.x * canvas.width;
+                    const y = landmark.y * canvas.height;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, 8, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#00FF00';
+                    ctx.fill();
+                }
+            });
+        }
+
+        // Pagrindinė aptikimo funkcija
+        async function detectPose() {
+            if (!poseLandmarker || !video.videoWidth) return;
+            
+            try {
+                const detections = await poseLandmarker.detectForVideo(video, performance.now());
+                
+                if (detections.landmarks && detections.landmarks.length > 0) {
+                    const landmarks = detections.landmarks[0];
+                    const { leftHip, rightHip, leftKnee, rightKnee } = updateLandmarkInfo(landmarks);
+                    
+                    // Skaičiuojame kampą tarp klubų ir kelių
+                    const leftAngle = calculateAngle(leftHip, leftKnee, {x: leftHip.x, y: leftKnee.y});
+                    const rightAngle = calculateAngle(rightHip, rightKnee, {x: rightHip.x, y: rightKnee.y});
+                    const avgAngle = ((leftAngle + rightAngle) / 2).toFixed(1);
+                    
+                    angleDisplay.textContent = `Kampas: ${avgAngle}°`;
+                    drawLandmarks(landmarks);
+                } else {
+                    angleDisplay.textContent = 'Kampas: Nepavyko aptikti';
+                    landmarkData.textContent = 'Palaukite, kol bus aptikta poza...';
+                }
+            } catch (error) {
+                console.error('Aptikimo klaida:', error);
+            }
+            
+            requestAnimationFrame(detectPose);
+        }
+
+        // Paleidžiame visą sistemą
+        async function startDetection() {
+            await initializePoseLandmarker();
+            detectPose();
+        }
+
+        // Event listeners
         retryButton.addEventListener('click', initCamera);
         
         document.addEventListener('DOMContentLoaded', () => {
@@ -186,95 +262,6 @@
                 initCamera();
             }
         });
-
-        let poseLandmarker;
-
-        async function initializePoseLandmarker() {
-            const filesetResolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
-            poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
-                },
-                runningMode: 'VIDEO',
-                numPoses: 1,
-                minPoseDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
-        }
-
-        function updateCoordinateDisplay(landmarks) {
-            const coords = {};
-            for (const [name, index] of Object.entries(LANDMARK_INDICES)) {
-                if (landmarks[index]) {
-                    coords[name] = {
-                        x: landmarks[index].x.toFixed(4),
-                        y: landmarks[index].y.toFixed(4),
-                        z: landmarks[index].z?.toFixed(4) || 'N/A'
-                    };
-                }
-            }
-            coordDisplay.textContent = JSON.stringify(coords, null, 2);
-        }
-
-        async function detectPose() {
-            if (!poseLandmarker || !video.videoWidth) return;
-            
-            try {
-                const detections = await poseLandmarker.detectForVideo(video, performance.now());
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                if (detections.landmarks && detections.landmarks.length > 0) {
-                    const landmarks = detections.landmarks[0];
-                    const leftHip = landmarks[LANDMARK_INDICES.LEFT_HIP];
-                    const leftKnee = landmarks[LANDMARK_INDICES.LEFT_KNEE];
-                    const rightHip = landmarks[LANDMARK_INDICES.RIGHT_HIP];
-                    const rightKnee = landmarks[LANDMARK_INDICES.RIGHT_KNEE];
-                    
-                    if (leftHip && leftKnee && rightHip && rightKnee) {
-                        const lhx = leftHip.x * canvas.width;
-                        const lhy = leftHip.y * canvas.height;
-                        const lkx = leftKnee.x * canvas.width;
-                        const lky = leftKnee.y * canvas.height;
-                        const rhx = rightHip.x * canvas.width;
-                        const rhy = rightHip.y * canvas.height;
-                        const rkx = rightKnee.x * canvas.width;
-                        const rky = rightKnee.y * canvas.height;
-                        
-                        const angle = calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky);
-                        
-                        angleDisplay.textContent = angle !== null 
-                            ? `Angle: ${angle.toFixed(2)}°` 
-                            : 'Calculating...';
-                        
-                        updateCoordinateDisplay(landmarks);
-                        
-                        // Draw the 4 key points
-                        [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
-                            ctx.beginPath();
-                            ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
-                            ctx.fillStyle = 'green';
-                            ctx.fill();
-                        });
-                    } else {
-                        angleDisplay.textContent = 'Partial pose detected';
-                        coordDisplay.textContent = 'Waiting for all landmarks...';
-                    }
-                } else {
-                    angleDisplay.textContent = 'No pose detected';
-                    coordDisplay.textContent = 'No landmarks detected';
-                }
-            } catch (error) {
-                console.error('Detection error:', error);
-                angleDisplay.textContent = 'Detection error';
-            }
-            
-            requestAnimationFrame(detectPose);
-        }
-
-        async function startDetection() {
-            await initializePoseLandmarker();
-            detectPose();
-        }
 
         window.addEventListener('resize', () => {
             if (video.videoWidth) {
