@@ -1,14 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="lt">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Pose Detection</title>
+    <title>Pozo Aptikimas</title>
     <style>
-        /* ... (keep all your existing styles) ... */
-        
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #video {
+            width: 100%;
+            height: 100vh;
+            object-fit: cover;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
         #stop-button {
             position: fixed;
             bottom: 60px;
@@ -22,7 +37,29 @@
             cursor: pointer;
             z-index: 1000;
         }
-        
+        #exportData {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            z-index: 1000;
+        }
+        #recording-status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            padding: 5px 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 5px;
+            z-index: 1000;
+        }
         #modal {
             display: none;
             position: fixed;
@@ -30,12 +67,11 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             z-index: 2000;
             justify-content: center;
             align-items: center;
         }
-        
         #modal-content {
             background: white;
             padding: 20px;
@@ -43,10 +79,32 @@
             max-width: 80%;
             text-align: center;
         }
-        
         .modal-button {
             margin: 10px;
             padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #f44336;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            z-index: 3000;
+            display: none;
+            text-align: center;
+        }
+        #retry-button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
             border: none;
             border-radius: 5px;
             cursor: pointer;
@@ -54,104 +112,269 @@
     </style>
 </head>
 <body>
-    <!-- ... (keep all your existing HTML) ... -->
-    
-    <button id="stop-button">Stop</button>
-    <button id="exportData">Export Data</button>
-    <div id="recording-status">Recording 2-4s...</div>
-    
-    <!-- Modal dialog -->
+    <video id="video" playsinline></video>
+    <canvas id="canvas"></canvas>
+    <button id="stop-button">Sustabdyti</button>
+    <button id="exportData">Eksportuoti Duomenis</button>
+    <div id="recording-status">Įrašoma 2-4s...</div>
     <div id="modal">
         <div id="modal-content">
-            <h3>Save collected data?</h3>
-            <p>You have recorded <span id="frame-count">0</span> pose frames.</p>
-            <button id="confirm-save" class="modal-button" style="background: #4CAF50; color: white;">Yes, Save</button>
-            <button id="cancel-save" class="modal-button" style="background: #f44336; color: white;">No, Continue</button>
+            <h3>Išsaugoti surinktus duomenis?</h3>
+            <p>Jūs įrašėte <span id="frame-count">0</span> pozo kadrų.</p>
+            <button id="confirm-save" class="modal-button" style="background: #4CAF50; color: white;">Taip, Išsaugoti</button>
+            <button id="cancel-save" class="modal-button" style="background: #f44336; color: white;">Ne, Tęsti</button>
         </div>
     </div>
+    <div id="error-message">
+        <p id="error-text"></p>
+        <button id="retry-button">Bandyti Dar Kartą</button>
+    </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js"></script>
     <script type="module">
-        // ... (keep all your existing imports and math functions) ...
-        
-        // Add these variables
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const recordingStatus = document.getElementById('recording-status');
+        const errorMessage = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+        const retryButton = document.getElementById('retry-button');
         let isRecording = false;
-        let shouldContinue = true;
-        
-        // Modified savePoseData function
-        function savePoseData(landmarks, angle) {
-            if (!isRecording) return;
-            
-            const elapsedSec = (Date.now() - recordingStartTime) / 1000;
-            const shouldKeep = elapsedSec >= TARGET_START_SEC && elapsedSec <= TARGET_END_SEC;
-            
-            if (shouldKeep) {
-                // ... (keep your existing saving logic) ...
+        let recordingStartTime = 0;
+        const TARGET_START_SEC = 2;
+        const TARGET_END_SEC = 4;
+        let poseDataHistory = [];
+
+        // Check for secure context
+        function isSecureContext() {
+            return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        }
+
+        // Show error message
+        function showError(message) {
+            errorText.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        // Hide error message
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        // Start webcam with error handling
+        async function startWebcam() {
+            if (!isSecureContext()) {
+                showError('Šiai programai reikalingas saugus kontekstas (HTTPS arba localhost). Prašome naudoti saugų ryšį.');
+                return false;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 1280, height: 720 }
+                });
+                videoElement.srcObject = stream;
+                await videoElement.play();
+                hideError();
+                return true;
+            } catch (error) {
+                if (error.name === 'NotAllowedError') {
+                    showError('Kamera neprieinama. Prašome leisti kamerai prieigą naršyklės nustatymuose ir spustelėti "Bandyti Dar Kartą".');
+                } else if (error.name === 'NotFoundError') {
+                    showError('Kamera nerasta. Prašome prijungti kamerą ir spustelėti "Bandyti Dar Kartą".');
+                } else {
+                    showError(`Nepavyko pasiekti kameros: ${error.message}. Spustelėkite "Bandyti Dar Kartą".`);
+                }
+                return false;
             }
         }
-        
-        // New function to handle data export
+
+        // Initialize MediaPipe Pose
+        const pose = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}`
+        });
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        pose.onResults(onResults);
+
+        // Process pose results
+        function onResults(results) {
+            if (!results.poseLandmarks) return;
+
+            // Clear canvas
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Draw landmarks
+            canvasCtx.globalCompositeOperation = 'source-over';
+            canvasCtx.strokeStyle = '#00FF00';
+            canvasCtx.lineWidth = 2;
+            for (let i = 0; i < results.poseLandmarks.length; i++) {
+                const x = results.poseLandmarks[i].x * canvasElement.width;
+                const y = results.poseLandmarks[i].y * canvasElement.height;
+                canvasCtx.beginPath();
+                canvasCtx.arc(x, y, 5, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = '#00FF00';
+                canvasCtx.fill();
+            }
+            canvasCtx.restore();
+
+            // Save pose data if recording
+            savePoseData(results.poseLandmarks);
+        }
+
+        // Save pose data
+        function savePoseData(landmarks) {
+            if (!isRecording) return;
+
+            const elapsedSec = (Date.now() - recordingStartTime) / 1000;
+            const shouldKeep = elapsedSec >= TARGET_START_SEC && elapsedSec <= TARGET_END_SEC;
+
+            if (shouldKeep) {
+                const frameData = {
+                    timestamp: Date.now(),
+                    landmarks: landmarks.map(lm => ({
+                        x: lm.x,
+                        y: lm.y,
+                        z: lm.z,
+                        visibility: lm.visibility
+                    }))
+                };
+                poseDataHistory.push(frameData);
+                localStorage.setItem('poseDataHistory', JSON.stringify(poseDataHistory));
+                recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
+            }
+        }
+
+        // Prepare data for sharing
         function prepareDataForSharing() {
             const data = localStorage.getItem('poseDataHistory');
             if (!data) return null;
-            
+
             const blob = new Blob([data], { type: 'application/json' });
             return {
-                filename: `pose_data_${new Date().toISOString().slice(0,10)}.json`,
+                filename: `pozos_duomenys_${new Date().toISOString().slice(0,10)}.json`,
                 blob: blob,
                 url: URL.createObjectURL(blob),
                 frameCount: JSON.parse(data).length
             };
         }
-        
-        // Stop button functionality
+
+        // Stop button handler
         document.getElementById('stop-button').addEventListener('click', () => {
             isRecording = false;
+            recordingStatus.textContent = 'Sustabdyta';
             const data = prepareDataForSharing();
-            
+
             if (data) {
                 document.getElementById('frame-count').textContent = data.frameCount;
                 document.getElementById('modal').style.display = 'flex';
             } else {
-                alert("No data collected yet!");
+                alert("Dar nėra surinkta duomenų!");
                 isRecording = true;
+                recordingStartTime = Date.now();
+                recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
             }
         });
-        
-        // Modal buttons
+
+        // Export data button handler
+        document.getElementById('exportData').addEventListener('click', () => {
+            const data = prepareDataForSharing();
+            if (data) {
+                const link = document.createElement('a');
+                link.href = data.url;
+                link.download = data.filename;
+                link.click();
+                URL.revokeObjectURL(data.url);
+            } else {
+                alert("Nėra duomenų eksportavimui!");
+            }
+        });
+
+        // Confirm save button handler (send via email or share)
         document.getElementById('confirm-save').addEventListener('click', () => {
             const data = prepareDataForSharing();
-            
-            // Create email with attachment
-            const mailtoLink = `mailto:?subject=Pose%20Data&body=Attached%20is%20the%20collected%20pose%20data.&attachment=${data.url}`;
-            
-            // For browsers that support navigator.share (mobile)
-            if (navigator.share) {
-                navigator.share({
-                    title: 'Pose Data',
-                    text: 'Collected pose frames',
-                    files: [new File([data.blob], data.filename)]
-                }).catch(() => {
-                    // Fallback to mailto
+            if (data) {
+                const mailtoLink = `mailto:?subject=Pozo%20Duomenys&body=Prisegti%20surinkti%20pozo%20duomenys.&attachment=${data.url}`;
+                
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Pozo Duomenys',
+                        text: 'Surinkti pozo kadrai',
+                        files: [new File([data.blob], data.filename, { type: 'application/json' })]
+                    }).then(() => {
+                        localStorage.removeItem('poseDataHistory');
+                        poseDataHistory = [];
+                        document.getElementById('modal').style.display = 'none';
+                        isRecording = false;
+                        recordingStatus.textContent = 'Sustabdyta';
+                    }).catch((error) => {
+                        console.error('Nepavyko pasidalinti:', error);
+                        window.location.href = mailtoLink;
+                        localStorage.removeItem('poseDataHistory');
+                        poseDataHistory = [];
+                        document.getElementById('modal').style.display = 'none';
+                        isRecording = false;
+                        recordingStatus.textContent = 'Sustabdyta';
+                    });
+                } else {
                     window.location.href = mailtoLink;
-                });
+                    localStorage.removeItem('poseDataHistory');
+                    poseDataHistory = [];
+                    document.getElementById('modal').style.display = 'none';
+                    isRecording = false;
+                    recordingStatus.textContent = 'Sustabdyta';
+                }
             } else {
-                // Desktop fallback
-                window.location.href = mailtoLink;
+                alert("Nėra duomenų išsaugojimui!");
+                document.getElementById('modal').style.display = 'none';
             }
-            
-            document.getElementById('modal').style.display = 'none';
         });
-        
+
+        // Cancel save button handler (continue recording)
         document.getElementById('cancel-save').addEventListener('click', () => {
             document.getElementById('modal').style.display = 'none';
             isRecording = true;
-            recordingStartTime = Date.now(); // Reset timer
+            recordingStartTime = Date.now();
+            recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
         });
-        
-        // Initialize with recording ON
-        document.addEventListener('DOMContentLoaded', () => {
-            isRecording = true;
-            // ... (rest of your existing init code) ...
+
+        // Retry button handler
+        retryButton.addEventListener('click', async () => {
+            hideError();
+            const success = await startWebcam();
+            if (success) {
+                startPoseDetection();
+            }
+        });
+
+        // Start pose detection
+        async function startPoseDetection() {
+            await pose.initialize();
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await pose.send({ image: videoElement });
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            const success = await startWebcam();
+            if (success) {
+                isRecording = true;
+                recordingStartTime = Date.now();
+                startPoseDetection();
+            }
         });
     </script>
 </body>
