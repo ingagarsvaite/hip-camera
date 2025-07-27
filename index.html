@@ -7,338 +7,151 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Pose Detection</title>
     <style>
-        body { 
-            margin: 0; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            font-family: Arial, sans-serif; 
-            background: #f5f5f5;
-        }
-        #container {
-            width: 100%;
-            max-width: 500px;
-            margin: 20px auto;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        #video-container { 
-            position: relative; 
-            width: 100%;
-            max-width: 400px;
-            margin: 0 auto;
-            border: 2px solid #333;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #000;
-        }
-        video { 
-            width: 100%; 
-            height: auto; 
-            display: block; 
-        }
-        canvas { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-        }
-        #angle-display { 
-            margin: 15px 0;
+        /* ... (keep all your existing styles) ... */
+        
+        #stop-button {
+            position: fixed;
+            bottom: 60px;
+            right: 10px;
             padding: 10px 20px;
-            font-size: 20px; 
-            color: white;
-            background: #333;
-            border-radius: 20px;
-            text-align: center;
-            min-width: 200px;
-        }
-        #permission-message { 
-            display: none; 
-            padding: 20px; 
-            background: #ffeb3b; 
-            border-radius: 5px; 
-            margin: 20px;
-            text-align: center;
-            max-width: 400px;
-        }
-        #retry-button {
-            margin-top: 15px;
-            padding: 10px 20px;
-            background: #4285f4;
+            background: #ff4444;
             color: white;
             border: none;
             border-radius: 5px;
             font-size: 16px;
             cursor: pointer;
-        }
-        #exportData {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            opacity: 0.2;
-            padding: 5px;
             z-index: 1000;
         }
-        #recording-status {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 5px;
+        
+        #modal {
             display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 80%;
+            text-align: center;
+        }
+        
+        .modal-button {
+            margin: 10px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
-    <div id="container">
-        <div id="permission-message">
-            Please allow camera access to use this application.
-            <br><br>
-            <button id="retry-button">Enable Camera</button>
-        </div>
-        <div id="video-container">
-            <video id="video" playsinline autoplay muted></video>
-            <canvas id="canvas"></canvas>
-        </div>
-        <div id="angle-display">Angle: XX deg</div>
-    </div>
+    <!-- ... (keep all your existing HTML) ... -->
+    
+    <button id="stop-button">Stop</button>
     <button id="exportData">Export Data</button>
     <div id="recording-status">Recording 2-4s...</div>
+    
+    <!-- Modal dialog -->
+    <div id="modal">
+        <div id="modal-content">
+            <h3>Save collected data?</h3>
+            <p>You have recorded <span id="frame-count">0</span> pose frames.</p>
+            <button id="confirm-save" class="modal-button" style="background: #4CAF50; color: white;">Yes, Save</button>
+            <button id="cancel-save" class="modal-button" style="background: #f44336; color: white;">No, Continue</button>
+        </div>
+    </div>
 
     <script type="module">
-        import { PoseLandmarker, FilesetResolver } from 'https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0';
-
-        // Timing control
-        let recordingStartTime = null;
-        const TARGET_START_SEC = 2;
-        const TARGET_END_SEC = 4;
-        let isInTargetWindow = false;
+        // ... (keep all your existing imports and math functions) ...
         
-        // More accurate timer for mobile
-        window.performance.now = window.performance.now || 
-            (() => Date.now() - (performance.timing.navigationStart || Date.now()));
-
-        // Math utilities
-        function lineEquation(x1, y1, x2, y2) {
-            const k = (y2 - y1) / (x2 - x1);
-            const b = y2 - k * x2;
-            return { k, b };
-        }
-
-        function intersectionPoint(k1, b1, k2, b2) {
-            const x = (b2 - b1) / (k1 - k2);
-            const y = k1 * x + b1;
-            return { x, y };
-        }
-
-        function calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky) {
-            try {
-                const leftLine = lineEquation(lhx, lhy, lkx, lky);
-                const rightLine = lineEquation(rhx, rhy, rkx, rky);
-                const intersection = intersectionPoint(leftLine.k, leftLine.b, rightLine.k, rightLine.b);
-                const x = intersection.x;
-                const y = intersection.y;
-                const ll = Math.sqrt((x - lkx)**2 + (y - lky)**2);
-                const rl = Math.sqrt((x - rkx)**2 + (y - rky)**2);
-                const dist = Math.sqrt((rkx - lkx)**2 + (rky - lky)**2);
-                const alpha = (dist**2 - rl**2 - ll**2) / (-2 * ll * rl);
-                const angle = Math.acos(alpha) * (180 / Math.PI);
-                return angle;
-            } catch (error) {
-                console.error('Error calculating angle:', error);
-                return null;
-            }
-        }
-
-        // DOM elements
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const angleDisplay = document.getElementById('angle-display');
-        const permissionMessage = document.getElementById('permission-message');
-        const retryButton = document.getElementById('retry-button');
-        const videoContainer = document.getElementById('video-container');
-        const exportButton = document.getElementById('exportData');
-        const statusElement = document.getElementById('recording-status');
-
-        // Initialize storage
-        localStorage.setItem('poseDataHistory', JSON.stringify([]));
-
-        // Save pose data with 10 decimal precision
+        // Add these variables
+        let isRecording = false;
+        let shouldContinue = true;
+        
+        // Modified savePoseData function
         function savePoseData(landmarks, angle) {
-            // Initialize timer on first detection
-            if (!recordingStartTime) {
-                recordingStartTime = Date.now();
-                return;
-            }
-
+            if (!isRecording) return;
+            
             const elapsedSec = (Date.now() - recordingStartTime) / 1000;
             const shouldKeep = elapsedSec >= TARGET_START_SEC && elapsedSec <= TARGET_END_SEC;
             
             if (shouldKeep) {
-                if (!isInTargetWindow) {
-                    console.log("🎬 Started capturing target frames");
-                    localStorage.setItem('poseDataHistory', "[]");
-                    isInTargetWindow = true;
-                    statusElement.style.display = 'block';
-                }
-
-                const history = JSON.parse(localStorage.getItem('poseDataHistory'));
-                history.push({
-                    time: elapsedSec.toFixed(10),
-                    angle: angle.toFixed(10),
-                    landmarks: landmarks.map(p => ({
-                        x: p.x.toFixed(10),
-                        y: p.y.toFixed(10),
-                        z: p.z?.toFixed(10) || "0.0000000000"
-                    }))
-                });
-                localStorage.setItem('poseDataHistory', JSON.stringify(history));
-            } 
-            else if (elapsedSec > TARGET_END_SEC && isInTargetWindow) {
-                console.log("⏹ Stopped capturing");
-                isInTargetWindow = false;
-                statusElement.style.display = 'none';
+                // ... (keep your existing saving logic) ...
             }
         }
-
-        // Export all collected data
-        function exportAllData() {
-            try {
-                const data = localStorage.getItem('poseDataHistory');
-                if (!data || JSON.parse(data).length === 0) {
-                    alert('No pose data collected yet!');
-                    return;
-                }
-                
-                const blob = new Blob([data], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `pose_data_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 100);
-            } catch (error) {
-                console.error("Export failed:", error);
-                alert("Export failed: " + error.message);
-            }
-        }
-
-        // Camera setup
-        function initCamera() {
-            const constraints = {
-                video: { 
-                    facingMode: "environment",
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
-            };
-
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(stream => {
-                    permissionMessage.style.display = 'none';
-                    video.srcObject = stream;
-                    video.onloadedmetadata = () => {
-                        canvas.width = videoContainer.clientWidth;
-                        canvas.height = videoContainer.clientWidth * (video.videoHeight / video.videoWidth);
-                        startDetection();
-                    };
-                })
-                .catch(error => {
-                    console.error('Error accessing camera:', error);
-                    angleDisplay.textContent = 'Camera Error - Please Enable Access';
-                    permissionMessage.style.display = 'block';
-                });
-        }
-
-        // Pose detection
-        let poseLandmarker;
-        async function initializePoseLandmarker() {
-            const filesetResolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
-            poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
-                },
-                runningMode: 'VIDEO',
-                numPoses: 1,
-                minPoseDetectionConfidence: 0.45,
-                minTrackingConfidence: 0.45
-            });
-        }
-
-        async function detectPose() {
-            if (!poseLandmarker || !video.videoWidth) return;
-            
-            try {
-                const detections = await poseLandmarker.detectForVideo(video, performance.now());
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                if (detections.landmarks && detections.landmarks.length > 0) {
-                    const landmarks = detections.landmarks[0];
-                    const leftHip = landmarks[23];
-                    const leftKnee = landmarks[25];
-                    const rightHip = landmarks[24];
-                    const rightKnee = landmarks[26];
-                    
-                    if (leftHip && leftKnee && rightHip && rightKnee) {
-                        const angle = calculateAngle(
-                            leftHip.x * canvas.width, leftHip.y * canvas.height,
-                            leftKnee.x * canvas.width, leftKnee.y * canvas.height,
-                            rightHip.x * canvas.width, rightHip.y * canvas.height,
-                            rightKnee.x * canvas.width, rightKnee.y * canvas.height
-                        );
-                        
-                        angleDisplay.textContent = angle !== null 
-                            ? `Angle: ${angle.toFixed(2)}°` 
-                            : 'Calculating...';
-
-                        savePoseData(landmarks, angle);
-                        
-                        [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
-                            ctx.beginPath();
-                            ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
-                            ctx.fillStyle = 'green';
-                            ctx.fill();
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error('Detection error:', error);
-            }
-            requestAnimationFrame(detectPose);
-        }
-
-        async function startDetection() {
-            await initializePoseLandmarker();
-            detectPose();
-        }
-
-        // Event listeners
-        retryButton.addEventListener('click', initCamera);
-        exportButton.addEventListener('click', exportAllData);
         
-        document.addEventListener('DOMContentLoaded', () => {
-            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
-                permissionMessage.style.display = 'block';
+        // New function to handle data export
+        function prepareDataForSharing() {
+            const data = localStorage.getItem('poseDataHistory');
+            if (!data) return null;
+            
+            const blob = new Blob([data], { type: 'application/json' });
+            return {
+                filename: `pose_data_${new Date().toISOString().slice(0,10)}.json`,
+                blob: blob,
+                url: URL.createObjectURL(blob),
+                frameCount: JSON.parse(data).length
+            };
+        }
+        
+        // Stop button functionality
+        document.getElementById('stop-button').addEventListener('click', () => {
+            isRecording = false;
+            const data = prepareDataForSharing();
+            
+            if (data) {
+                document.getElementById('frame-count').textContent = data.frameCount;
+                document.getElementById('modal').style.display = 'flex';
             } else {
-                initCamera();
+                alert("No data collected yet!");
+                isRecording = true;
             }
         });
-
-        window.addEventListener('resize', () => {
-            if (video.videoWidth) {
-                canvas.width = videoContainer.clientWidth;
-                canvas.height = videoContainer.clientWidth * (video.videoHeight / video.videoWidth);
+        
+        // Modal buttons
+        document.getElementById('confirm-save').addEventListener('click', () => {
+            const data = prepareDataForSharing();
+            
+            // Create email with attachment
+            const mailtoLink = `mailto:?subject=Pose%20Data&body=Attached%20is%20the%20collected%20pose%20data.&attachment=${data.url}`;
+            
+            // For browsers that support navigator.share (mobile)
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Pose Data',
+                    text: 'Collected pose frames',
+                    files: [new File([data.blob], data.filename)]
+                }).catch(() => {
+                    // Fallback to mailto
+                    window.location.href = mailtoLink;
+                });
+            } else {
+                // Desktop fallback
+                window.location.href = mailtoLink;
             }
+            
+            document.getElementById('modal').style.display = 'none';
+        });
+        
+        document.getElementById('cancel-save').addEventListener('click', () => {
+            document.getElementById('modal').style.display = 'none';
+            isRecording = true;
+            recordingStartTime = Date.now(); // Reset timer
+        });
+        
+        // Initialize with recording ON
+        document.addEventListener('DOMContentLoaded', () => {
+            isRecording = true;
+            // ... (rest of your existing init code) ...
         });
     </script>
 </body>
