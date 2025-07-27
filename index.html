@@ -109,6 +109,17 @@
             border-radius: 5px;
             cursor: pointer;
         }
+        #debug-message {
+            position: fixed;
+            top: 40px;
+            left: 10px;
+            padding: 5px 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 5px;
+            z-index: 1000;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -117,6 +128,7 @@
     <button id="stop-button">Sustabdyti</button>
     <button id="exportData">Eksportuoti Duomenis</button>
     <div id="recording-status">Įrašoma 2-4s...</div>
+    <div id="debug-message"></div>
     <div id="modal">
         <div id="modal-content">
             <h3>Išsaugoti surinktus duomenis?</h3>
@@ -139,11 +151,23 @@
         const errorMessage = document.getElementById('error-message');
         const errorText = document.getElementById('error-text');
         const retryButton = document.getElementById('retry-button');
+        const debugMessage = document.getElementById('debug-message');
         let isRecording = false;
         let recordingStartTime = 0;
         const TARGET_START_SEC = 2;
         const TARGET_END_SEC = 4;
         let poseDataHistory = [];
+
+        // Show debug message
+        function showDebug(message) {
+            debugMessage.textContent = message;
+            debugMessage.style.display = 'block';
+        }
+
+        // Hide debug message
+        function hideDebug() {
+            debugMessage.style.display = 'none';
+        }
 
         // Check for secure context
         function isSecureContext() {
@@ -161,7 +185,7 @@
             errorMessage.style.display = 'none';
         }
 
-        // Start webcam with error handling
+        // Start webcam with rear camera
         async function startWebcam() {
             if (!isSecureContext()) {
                 showError('Šiai programai reikalingas saugus kontekstas (HTTPS arba localhost). Prašome naudoti saugų ryšį.');
@@ -170,17 +194,22 @@
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 1280, height: 720 }
+                    video: {
+                        width: 1280,
+                        height: 720,
+                        facingMode: 'environment' // Use rear camera
+                    }
                 });
                 videoElement.srcObject = stream;
                 await videoElement.play();
                 hideError();
+                showDebug('Galinė kamera sėkmingai paleista');
                 return true;
             } catch (error) {
                 if (error.name === 'NotAllowedError') {
                     showError('Kamera neprieinama. Prašome leisti kamerai prieigą naršyklės nustatymuose ir spustelėti "Bandyti Dar Kartą".');
                 } else if (error.name === 'NotFoundError') {
-                    showError('Kamera nerasta. Prašome prijungti kamerą ir spustelėti "Bandyti Dar Kartą".');
+                    showError('Galinė kamera nerasta. Prašome užtikrinti, kad įrenginys turi galinę kamerą, ir spustelėti "Bandyti Dar Kartą".');
                 } else {
                     showError(`Nepavyko pasiekti kameros: ${error.message}. Spustelėkite "Bandyti Dar Kartą".`);
                 }
@@ -203,7 +232,10 @@
 
         // Process pose results
         function onResults(results) {
-            if (!results.poseLandmarks) return;
+            if (!results.poseLandmarks) {
+                showDebug('Pozo duomenys nerasti');
+                return;
+            }
 
             // Clear canvas
             canvasCtx.save();
@@ -247,21 +279,35 @@
                 poseDataHistory.push(frameData);
                 localStorage.setItem('poseDataHistory', JSON.stringify(poseDataHistory));
                 recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
+                showDebug(`Įrašytas kadras: ${poseDataHistory.length}`);
             }
         }
 
-        // Prepare data for sharing
+        // Prepare data for sharing or export
         function prepareDataForSharing() {
             const data = localStorage.getItem('poseDataHistory');
-            if (!data) return null;
+            if (!data || data === '[]') {
+                showDebug('Nėra duomenų eksportavimui');
+                return null;
+            }
 
-            const blob = new Blob([data], { type: 'application/json' });
-            return {
-                filename: `pozos_duomenys_${new Date().toISOString().slice(0,10)}.json`,
-                blob: blob,
-                url: URL.createObjectURL(blob),
-                frameCount: JSON.parse(data).length
-            };
+            try {
+                const parsedData = JSON.parse(data);
+                if (!Array.isArray(parsedData) || parsedData.length === 0) {
+                    showDebug('Duomenys tušti arba netinkamo formato');
+                    return null;
+                }
+                const blob = new Blob([JSON.stringify(parsedData, null, 2)], { type: 'application/json' });
+                return {
+                    filename: `pozos_duomenys_${new Date().toISOString().slice(0,10)}.json`,
+                    blob: blob,
+                    url: URL.createObjectURL(blob),
+                    frameCount: parsedData.length
+                };
+            } catch (error) {
+                showDebug(`Klaida ruošiant duomenis: ${error.message}`);
+                return null;
+            }
         }
 
         // Stop button handler
@@ -273,11 +319,13 @@
             if (data) {
                 document.getElementById('frame-count').textContent = data.frameCount;
                 document.getElementById('modal').style.display = 'flex';
+                showDebug(`Sustabdyta, paruošta ${data.frameCount} kadrų`);
             } else {
                 alert("Dar nėra surinkta duomenų!");
                 isRecording = true;
                 recordingStartTime = Date.now();
                 recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
+                showDebug('Nėra duomenų, tęsiamas įrašymas');
             }
         });
 
@@ -285,13 +333,23 @@
         document.getElementById('exportData').addEventListener('click', () => {
             const data = prepareDataForSharing();
             if (data) {
-                const link = document.createElement('a');
-                link.href = data.url;
-                link.download = data.filename;
-                link.click();
-                URL.revokeObjectURL(data.url);
+                try {
+                    const link = document.createElement('a');
+                    link.href = data.url;
+                    link.download = data.filename;
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(data.url);
+                    showDebug(`Eksportuotas failas: ${data.filename}, kadrų: ${data.frameCount}`);
+                } catch (error) {
+                    alert(`Nepavyko eksportuoti duomenų: ${error.message}`);
+                    showDebug(`Eksportavimo klaida: ${error.message}`);
+                }
             } else {
                 alert("Nėra duomenų eksportavimui!");
+                showDebug('Eksportavimas nepavyko: nėra duomenų');
             }
         });
 
@@ -312,6 +370,7 @@
                         document.getElementById('modal').style.display = 'none';
                         isRecording = false;
                         recordingStatus.textContent = 'Sustabdyta';
+                        showDebug('Duomenys sėkmingai pasidalinti');
                     }).catch((error) => {
                         console.error('Nepavyko pasidalinti:', error);
                         window.location.href = mailtoLink;
@@ -320,6 +379,7 @@
                         document.getElementById('modal').style.display = 'none';
                         isRecording = false;
                         recordingStatus.textContent = 'Sustabdyta';
+                        showDebug(`Dalijimosi klaida: ${error.message}, naudojamas mailto`);
                     });
                 } else {
                     window.location.href = mailtoLink;
@@ -328,10 +388,12 @@
                     document.getElementById('modal').style.display = 'none';
                     isRecording = false;
                     recordingStatus.textContent = 'Sustabdyta';
+                    showDebug('Duomenys siunčiami per mailto');
                 }
             } else {
                 alert("Nėra duomenų išsaugojimui!");
                 document.getElementById('modal').style.display = 'none';
+                showDebug('Išsaugojimas nepavyko: nėra duomenų');
             }
         });
 
@@ -341,6 +403,7 @@
             isRecording = true;
             recordingStartTime = Date.now();
             recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
+            showDebug('Tęsti įrašymą');
         });
 
         // Retry button handler
@@ -354,15 +417,21 @@
 
         // Start pose detection
         async function startPoseDetection() {
-            await pose.initialize();
-            const camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    await pose.send({ image: videoElement });
-                },
-                width: 1280,
-                height: 720
-            });
-            camera.start();
+            try {
+                await pose.initialize();
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await pose.send({ image: videoElement });
+                    },
+                    width: 1280,
+                    height: 720
+                });
+                camera.start();
+                showDebug('Pozo aptikimas paleistas');
+            } catch (error) {
+                showError(`Nepavyko paleisti pozo aptikimo: ${error.message}`);
+                showDebug(`Pozo aptikimo klaida: ${error.message}`);
+            }
         }
 
         // Initialize
@@ -374,6 +443,8 @@
                 isRecording = true;
                 recordingStartTime = Date.now();
                 startPoseDetection();
+            } else {
+                showDebug('Nepavyko paleisti kameros');
             }
         });
     </script>
