@@ -152,6 +152,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675469404/camera_utils.js"></script>
     <script type="module">
         const videoElement = document.getElementById('video');
         const canvasElement = document.getElementById('canvas');
@@ -236,8 +237,8 @@
             modelComplexity: 1,
             smoothLandmarks: true,
             enableSegmentation: false,
-            minDetectionConfidence: 0.3, // Lowered for better detection
-            minTrackingConfidence: 0.3 // Lowered for better tracking
+            minDetectionConfidence: 0.2, // Lowered for better detection
+            minTrackingConfidence: 0.2 // Lowered for better tracking
         });
         pose.onResults(onResults);
 
@@ -248,7 +249,7 @@
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
             if (!results.poseLandmarks) {
-                showDebug('Kūno taškai neaptikti. Įsitikinkite, kad žmogus matomas kameroje.');
+                showDebug('Kūno taškai neaptikti. Įsitikinkite, kad žmogus yra 1-2 m atstumu, gerai apšviestas ir visas kūnas matomas kameroje.');
                 canvasCtx.restore();
                 return;
             }
@@ -338,11 +339,11 @@
                 document.getElementById('modal').style.display = 'flex';
                 showDebug(`Sustabdyta, paruošta ${data.frameCount} kadrų`);
             } else {
-                alert("Dar nėra surinkta duomenų! Bandykite įrašyti 2-4 sekundes.");
+                alert("Dar nėra surinkta duomenų! Bandykite įrašyti 2-4 sekundes, užtikrindami, kad žmogus matomas kameroje.");
                 isRecording = true;
                 recordingStartTime = Date.now();
                 recordingStatus.textContent = `Įrašoma ${TARGET_START_SEC}-${TARGET_END_SEC}s... Kadrai: ${poseDataHistory.length}`;
-                showDebug('Nėra duomen Shadows: none; background: #f1f1f1; } .modal-button:hover, .modal-button:active { background: #3d8b3d; } #cancel-save:hover, #cancel-save:active { background: #d32f2f; } #retry-button:hover, #retry-button:active { background: #3d8b3d; } #debug-message { display: none; }');
+                showDebug('Nėra duomenų, tęsiamas įrašymas');
             }
         });
 
@@ -365,7 +366,7 @@
                     showDebug(`Eksportavimo klaida: ${error.message}`);
                 }
             } else {
-                alert("Nėra duomenų eksportavimui!");
+                alert("Nėra duomenų eksportavimui! Įsitikinkite, kad žmogus matomas kameroje ir įrašyta 2-4 sekundes.");
                 showDebug('Eksportavimas nepavyko: nėra duomenų');
             }
         });
@@ -408,7 +409,7 @@
                     showDebug('Duomenys siunčiami per mailto');
                 }
             } else {
-                alert("Nėra duomenų išsaugojimui!");
+                alert("Nėra duomenų išsaugojimui! Įsitikinkite, kad žmogus matomas kameroje ir įrašyta 2-4 sekundes.");
                 document.getElementById('modal').style.display = 'none';
                 showDebug('Išsaugojimas nepavyko: nėra duomenų');
             }
