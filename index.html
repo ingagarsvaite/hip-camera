@@ -74,6 +74,24 @@
             font-size: 16px;
             cursor: pointer;
         }
+        #exportData {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            opacity: 0.2;
+            padding: 5px;
+            z-index: 1000;
+        }
+        #recording-status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -89,10 +107,23 @@
         </div>
         <div id="angle-display">Angle: XX deg</div>
     </div>
+    <button id="exportData">Export Data</button>
+    <div id="recording-status">Recording 2-4s...</div>
 
     <script type="module">
-        import { PoseLandmarker, FilesetResolver, DrawingUtils } from 'https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0';
+        import { PoseLandmarker, FilesetResolver } from 'https://cdn.skypack.dev/@mediapipe/tasks-vision@0.10.0';
 
+        // Timing control
+        let recordingStartTime = null;
+        const TARGET_START_SEC = 2;
+        const TARGET_END_SEC = 4;
+        let isInTargetWindow = false;
+        
+        // More accurate timer for mobile
+        window.performance.now = window.performance.now || 
+            (() => Date.now() - (performance.timing.navigationStart || Date.now()));
+
+        // Math utilities
         function lineEquation(x1, y1, x2, y2) {
             const k = (y2 - y1) / (x2 - x1);
             const b = y2 - k * x2;
@@ -124,6 +155,7 @@
             }
         }
 
+        // DOM elements
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -131,7 +163,77 @@
         const permissionMessage = document.getElementById('permission-message');
         const retryButton = document.getElementById('retry-button');
         const videoContainer = document.getElementById('video-container');
+        const exportButton = document.getElementById('exportData');
+        const statusElement = document.getElementById('recording-status');
 
+        // Initialize storage
+        localStorage.setItem('poseDataHistory', JSON.stringify([]));
+
+        // Save pose data with 10 decimal precision
+        function savePoseData(landmarks, angle) {
+            // Initialize timer on first detection
+            if (!recordingStartTime) {
+                recordingStartTime = Date.now();
+                return;
+            }
+
+            const elapsedSec = (Date.now() - recordingStartTime) / 1000;
+            const shouldKeep = elapsedSec >= TARGET_START_SEC && elapsedSec <= TARGET_END_SEC;
+            
+            if (shouldKeep) {
+                if (!isInTargetWindow) {
+                    console.log("🎬 Started capturing target frames");
+                    localStorage.setItem('poseDataHistory', "[]");
+                    isInTargetWindow = true;
+                    statusElement.style.display = 'block';
+                }
+
+                const history = JSON.parse(localStorage.getItem('poseDataHistory'));
+                history.push({
+                    time: elapsedSec.toFixed(10),
+                    angle: angle.toFixed(10),
+                    landmarks: landmarks.map(p => ({
+                        x: p.x.toFixed(10),
+                        y: p.y.toFixed(10),
+                        z: p.z?.toFixed(10) || "0.0000000000"
+                    }))
+                });
+                localStorage.setItem('poseDataHistory', JSON.stringify(history));
+            } 
+            else if (elapsedSec > TARGET_END_SEC && isInTargetWindow) {
+                console.log("⏹ Stopped capturing");
+                isInTargetWindow = false;
+                statusElement.style.display = 'none';
+            }
+        }
+
+        // Export all collected data
+        function exportAllData() {
+            try {
+                const data = localStorage.getItem('poseDataHistory');
+                if (!data || JSON.parse(data).length === 0) {
+                    alert('No pose data collected yet!');
+                    return;
+                }
+                
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `pose_data_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            } catch (error) {
+                console.error("Export failed:", error);
+                alert("Export failed: " + error.message);
+            }
+        }
+
+        // Camera setup
         function initCamera() {
             const constraints = {
                 video: { 
@@ -146,7 +248,6 @@
                     permissionMessage.style.display = 'none';
                     video.srcObject = stream;
                     video.onloadedmetadata = () => {
-                        // Set canvas size to match video display size (not video intrinsic size)
                         canvas.width = videoContainer.clientWidth;
                         canvas.height = videoContainer.clientWidth * (video.videoHeight / video.videoWidth);
                         startDetection();
@@ -159,18 +260,8 @@
                 });
         }
 
-        retryButton.addEventListener('click', initCamera);
-        
-        document.addEventListener('DOMContentLoaded', () => {
-            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
-                permissionMessage.style.display = 'block';
-            } else {
-                initCamera();
-            }
-        });
-
+        // Pose detection
         let poseLandmarker;
-
         async function initializePoseLandmarker() {
             const filesetResolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm');
             poseLandmarker = await PoseLandmarker.createFromOptions(filesetResolver, {
@@ -184,76 +275,65 @@
             });
         }
 
-        async function savePoseData(data) {
-            // Store data temporarily in browser
-            localStorage.setItem('poseData', JSON.stringify(data));
+        async function detectPose() {
+            if (!poseLandmarker || !video.videoWidth) return;
             
-            // Manual step: Download the data file
-            const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `pose_${Date.now()}.json`;
-            a.click();
-  
-  console.log("Data saved locally. Upload this file to GitHub!");
-}
+            try {
+                const detections = await poseLandmarker.detectForVideo(video, performance.now());
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                if (detections.landmarks && detections.landmarks.length > 0) {
+                    const landmarks = detections.landmarks[0];
+                    const leftHip = landmarks[23];
+                    const leftKnee = landmarks[25];
+                    const rightHip = landmarks[24];
+                    const rightKnee = landmarks[26];
+                    
+                    if (leftHip && leftKnee && rightHip && rightKnee) {
+                        const angle = calculateAngle(
+                            leftHip.x * canvas.width, leftHip.y * canvas.height,
+                            leftKnee.x * canvas.width, leftKnee.y * canvas.height,
+                            rightHip.x * canvas.width, rightHip.y * canvas.height,
+                            rightKnee.x * canvas.width, rightKnee.y * canvas.height
+                        );
+                        
+                        angleDisplay.textContent = angle !== null 
+                            ? `Angle: ${angle.toFixed(2)}°` 
+                            : 'Calculating...';
 
-       async function detectPose() {
-  if (!poseLandmarker || !video.videoWidth) return;
-  
-  try {
-    const detections = await poseLandmarker.detectForVideo(video, performance.now());
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    if (detections.landmarks && detections.landmarks.length > 0) {
-      const landmarks = detections.landmarks[0];
-      const leftHip = landmarks[23];
-      const leftKnee = landmarks[25];
-      const rightHip = landmarks[24];
-      const rightKnee = landmarks[26];
-      
-      if (leftHip && leftKnee && rightHip && rightKnee) {
-        const angle = calculateAngle(
-          leftHip.x * canvas.width, leftHip.y * canvas.height,
-          leftKnee.x * canvas.width, leftKnee.y * canvas.height,
-          rightHip.x * canvas.width, rightHip.y * canvas.height,
-          rightKnee.x * canvas.width, rightKnee.y * canvas.height
-        );
-        
-        angleDisplay.textContent = angle !== null 
-          ? `Angle: ${angle.toFixed(2)}°` 
-          : 'Calculating...';
-
-        // ▼ SAVE DATA WHEN POSE IS DETECTED ▼
-        if (!window.poseDataSaved) {
-          const poseData = {
-            timestamp: new Date().toISOString(),
-            angle: angle,
-            landmarks: {
-              leftHip: { x: leftHip.x, y: leftHip.y },
-              leftKnee: { x: leftKnee.x, y: leftKnee.y },
-              rightHip: { x: rightHip.x, y: rightHip.y },
-              rightKnee: { x: rightKnee.x, y: rightKnee.y }
+                        savePoseData(landmarks, angle);
+                        
+                        [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
+                            ctx.beginPath();
+                            ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
+                            ctx.fillStyle = 'green';
+                            ctx.fill();
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Detection error:', error);
             }
-          };
-          savePoseData(poseData);
-          window.poseDataSaved = true;
+            requestAnimationFrame(detectPose);
         }
-      }
-    }
-  } catch (error) {
-    console.error('Detection error:', error);
-  }
-  requestAnimationFrame(detectPose);
-}
 
         async function startDetection() {
             await initializePoseLandmarker();
             detectPose();
         }
 
-        // Handle window resize
+        // Event listeners
+        retryButton.addEventListener('click', initCamera);
+        exportButton.addEventListener('click', exportAllData);
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                permissionMessage.style.display = 'block';
+            } else {
+                initCamera();
+            }
+        });
+
         window.addEventListener('resize', () => {
             if (video.videoWidth) {
                 canvas.width = videoContainer.clientWidth;
