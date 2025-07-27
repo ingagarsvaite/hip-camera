@@ -184,54 +184,69 @@
             });
         }
 
-        async function detectPose() {
-            if (!poseLandmarker || !video.videoWidth) return;
+        async function savePoseData(data) {
+            // Store data temporarily in browser
+            localStorage.setItem('poseData', JSON.stringify(data));
             
-            try {
-                const detections = await poseLandmarker.detectForVideo(video, performance.now());
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                if (detections.landmarks && detections.landmarks.length > 0) {
-                    const landmarks = detections.landmarks[0];
-                    const leftHip = landmarks[23];
-                    const leftKnee = landmarks[25];
-                    const rightHip = landmarks[24];
-                    const rightKnee = landmarks[26];
-                    
-                    if (leftHip && leftKnee && rightHip && rightKnee) {
-                        const lhx = leftHip.x * canvas.width;
-                        const lhy = leftHip.y * canvas.height;
-                        const lkx = leftKnee.x * canvas.width;
-                        const lky = leftKnee.y * canvas.height;
-                        const rhx = rightHip.x * canvas.width;
-                        const rhy = rightHip.y * canvas.height;
-                        const rkx = rightKnee.x * canvas.width;
-                        const rky = rightKnee.y * canvas.height;
-                        const angle = calculateAngle(lhx, lhy, lkx, lky, rhx, rhy, rkx, rky);
-                        
-                        angleDisplay.textContent = angle !== null 
-                            ? `Angle: ${angle.toFixed(2)}°` 
-                            : 'Calculating...';
-                            
-                        [leftHip, leftKnee, rightHip, rightKnee].forEach(point => {
-                            ctx.beginPath();
-                            ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, 2 * Math.PI);
-                            ctx.fillStyle = 'green';
-                            ctx.fill();
-                        });
-                    } else {
-                        angleDisplay.textContent = 'Partial pose detected';
-                    }
-                } else {
-                    angleDisplay.textContent = 'No pose detected';
-                }
-            } catch (error) {
-                console.error('Detection error:', error);
-                angleDisplay.textContent = 'Detection error';
+            // Manual step: Download the data file
+            const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `pose_${Date.now()}.json`;
+            a.click();
+  
+  console.log("Data saved locally. Upload this file to GitHub!");
+}
+
+       async function detectPose() {
+  if (!poseLandmarker || !video.videoWidth) return;
+  
+  try {
+    const detections = await poseLandmarker.detectForVideo(video, performance.now());
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    if (detections.landmarks && detections.landmarks.length > 0) {
+      const landmarks = detections.landmarks[0];
+      const leftHip = landmarks[23];
+      const leftKnee = landmarks[25];
+      const rightHip = landmarks[24];
+      const rightKnee = landmarks[26];
+      
+      if (leftHip && leftKnee && rightHip && rightKnee) {
+        const angle = calculateAngle(
+          leftHip.x * canvas.width, leftHip.y * canvas.height,
+          leftKnee.x * canvas.width, leftKnee.y * canvas.height,
+          rightHip.x * canvas.width, rightHip.y * canvas.height,
+          rightKnee.x * canvas.width, rightKnee.y * canvas.height
+        );
+        
+        angleDisplay.textContent = angle !== null 
+          ? `Angle: ${angle.toFixed(2)}°` 
+          : 'Calculating...';
+
+        // ▼ SAVE DATA WHEN POSE IS DETECTED ▼
+        if (!window.poseDataSaved) {
+          const poseData = {
+            timestamp: new Date().toISOString(),
+            angle: angle,
+            landmarks: {
+              leftHip: { x: leftHip.x, y: leftHip.y },
+              leftKnee: { x: leftKnee.x, y: leftKnee.y },
+              rightHip: { x: rightHip.x, y: rightHip.y },
+              rightKnee: { x: rightKnee.x, y: rightKnee.y }
             }
-            
-            requestAnimationFrame(detectPose);
+          };
+          savePoseData(poseData);
+          window.poseDataSaved = true;
         }
+      }
+    }
+  } catch (error) {
+    console.error('Detection error:', error);
+  }
+  requestAnimationFrame(detectPose);
+}
 
         async function startDetection() {
             await initializePoseLandmarker();
