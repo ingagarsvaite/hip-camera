@@ -2,39 +2,80 @@
 <html lang="lt">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Kūno pozos analizė</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kūno pozos analizė su duomenų rinkimu</title>
     <style>
+        :root {
+            --primary-color: #4285f4;
+            --secondary-color: #34a853;
+            --accent-color: #ea4335;
+            --background-dark: #333;
+            --background-light: #f5f5f5;
+            --text-light: #fff;
+        }
+        
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            background: #f5f5f5;
+            background: var(--background-light);
+            color: #333;
+            line-height: 1.6;
+            padding: 0;
         }
+        
+        header {
+            text-align: center;
+            padding: 15px 0;
+            width: 100%;
+            background: var(--primary-color);
+            color: var(--text-light);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        
         #container {
             width: 100%;
             max-width: 500px;
             margin: 20px auto;
+            padding: 0 15px;
+            box-sizing: border-box;
         }
+        
+        .instructions {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            font-size: 0.9rem;
+        }
+        
         #video-container {
             position: relative;
             width: 100%;
             max-width: 400px;
             margin: 0 auto;
-            border: 2px solid #333;
+            border: 2px solid var(--primary-color);
             border-radius: 8px;
             overflow: hidden;
             background: #000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
+        
         video {
             width: 100%;
             height: auto;
             display: block;
+            transform: scaleX(-1);
         }
+        
         canvas {
             position: absolute;
             top: 0;
@@ -42,62 +83,237 @@
             width: 100%;
             height: 100%;
         }
+        
         #info-panel {
-            margin-top: 15px;
+            margin-top: 20px;
             padding: 15px;
-            background: #333;
+            background: var(--background-dark);
             border-radius: 8px;
-            color: white;
+            color: var(--text-light);
             width: 100%;
             max-width: 400px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
+        
         #angle-display {
-            font-size: 20px;
-            margin-bottom: 10px;
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            text-align: center;
+            font-weight: bold;
         }
+        
+        .angle-value {
+            color: var(--secondary-color);
+            font-size: 1.5rem;
+        }
+        
         #landmark-data {
             font-family: monospace;
-            font-size: 14px;
+            font-size: 0.85rem;
             white-space: pre-wrap;
             word-break: break-all;
+            background: rgba(255,255,255,0.1);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 150px;
+            overflow-y: auto;
         }
+        
         #permission-message {
             display: none;
             padding: 20px;
-            background: #ffeb3b;
-            border-radius: 5px;
-            margin: 20px;
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            margin: 20px 0;
             text-align: center;
             max-width: 400px;
+            color: #856404;
         }
-        #retry-button {
+        
+        .button {
             margin-top: 15px;
             padding: 10px 20px;
-            background: #4285f4;
+            background: var(--primary-color);
             color: white;
             border: none;
             border-radius: 5px;
-            font-size: 16px;
+            font-size: 1rem;
             cursor: pointer;
+            transition: background 0.3s;
+            display: inline-block;
+        }
+        
+        .button:hover {
+            background: #3367d6;
+        }
+        
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .button-success {
+            background: var(--secondary-color);
+        }
+        
+        .button-success:hover {
+            background: #2c8c47;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-active {
+            background: var(--secondary-color);
+            box-shadow: 0 0 5px var(--secondary-color);
+        }
+        
+        .status-inactive {
+            background: #ccc;
+        }
+        
+        .status-recording {
+            background: var(--accent-color);
+            box-shadow: 0 0 5px var(--accent-color);
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 10px;
+        }
+        
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .data-collection-info {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        
+        .progress-bar {
+            height: 10px;
+            background: #e0e0e0;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        
+        .progress {
+            height: 100%;
+            background: var(--primary-color);
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .time-display {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #666;
+            padding: 10px;
         }
     </style>
 </head>
 <body>
+    <header>
+        <h1>Kūno pozos analizė su duomenų rinkimu</h1>
+    </header>
+    
     <div id="container">
-        <div id="permission-message">
-            Prašome leisti kameros prieigą norint naudoti programą.
-            <br><br>
-            <button id="retry-button">Bandyti vėl</button>
+        <div class="instructions">
+            <p>Padėkite save taip, kad būtų matomi klubai ir keliai. Sistema automatiškai aptiks jūsų pozą ir apskaičiuos kampus.</p>
+            <p>Spustelėkite "Pradėti duomenų rinkimą", norėdami pradėti 3 sekundžių duomenų rinkimą (įrašoma kas 10ms, bet išsaugoma tik 1-2s intervalu).</p>
         </div>
+        
+        <div id="permission-message">
+            <p>Prašome leisti kameros prieigą norint naudoti programą.</p>
+            <p>Įsitikinkite, kad suteikėte kameros leidimą savo naršyklės nustatymuose.</p>
+            <button id="retry-button" class="button">Bandyti vėl</button>
+        </div>
+        
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>Kraunama...</p>
+        </div>
+        
         <div id="video-container">
             <video id="video" playsinline autoplay muted></video>
             <canvas id="canvas"></canvas>
         </div>
+        
+        <div class="data-collection-info">
+            <h3>Duomenų rinkimo statusas</h3>
+            <div class="progress-bar">
+                <div class="progress" id="progress-bar"></div>
+            </div>
+            <p id="collection-status">Laukiama duomenų rinkimo pradžios</p>
+            <p id="time-display" class="time-display">Įrašymo laikas: 0.0s / 3.0s</p>
+            <p id="samples-collected">Išsaugotų mėginių: 0 (1-2s intervalas)</p>
+        </div>
+        
+        <div class="controls">
+            <button id="start-collection" class="button">Pradėti duomenų rinkimą</button>
+            <button id="download-data" class="button button-success" disabled>Atsisiųsti duomenis</button>
+        </div>
+        
         <div id="info-panel">
-            <div id="angle-display">Kampas: XX°</div>
+            <div id="angle-display">
+                <span class="status-indicator status-inactive" id="status-indicator"></span>
+                <span id="angle-text">Kraunama...</span>
+                <div id="angle-value" class="angle-value">-</div>
+            </div>
             <div id="landmark-data">Taškų koordinatės:\n- LK: X:XX, Y:XX\n- DK: X:XX, Y:XX\n- LS: X:XX, Y:XX\n- DS: X:XX, Y:XX</div>
         </div>
     </div>
+
+    <footer>
+        <p>Sukurta naudojant MediaPipe Pose Landmarker | Duomenys eksportuojami JSON formatu</p>
+    </footer>
 
     <script type="module">
         import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/+esm';
@@ -105,9 +321,9 @@
         // Mus dominantys kūno taškai (MediaPipe numeracija)
         const LANDMARKS = {
             LEFT_HIP: 23,      // Kairės klubas
-            RIGHT_HIP: 24,      // Dešinės klubas
-            LEFT_KNEE: 25,      // Kairės kelis
-            RIGHT_KNEE: 26      // Dešinės kelis
+            RIGHT_HIP: 24,     // Dešinės klubas
+            LEFT_KNEE: 25,     // Kairės kelis
+            RIGHT_KNEE: 26     // Dešinės kelis
         };
 
         // Kameros inicijavimas
@@ -115,10 +331,29 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const angleDisplay = document.getElementById('angle-display');
+        const angleValue = document.getElementById('angle-value');
         const landmarkData = document.getElementById('landmark-data');
         const permissionMessage = document.getElementById('permission-message');
         const retryButton = document.getElementById('retry-button');
         const videoContainer = document.getElementById('video-container');
+        const statusIndicator = document.getElementById('status-indicator');
+        const angleText = document.getElementById('angle-text');
+        const startCollectionBtn = document.getElementById('start-collection');
+        const downloadDataBtn = document.getElementById('download-data');
+        const collectionStatus = document.getElementById('collection-status');
+        const samplesCollected = document.getElementById('samples-collected');
+        const progressBar = document.getElementById('progress-bar');
+        const timeDisplay = document.getElementById('time-display');
+
+        // Duomenų saugojimo kintamieji
+        let collectedData = [];
+        let isCollectingData = false;
+        let collectionInterval;
+        let collectionStartTime = 0;
+        const totalCollectionTime = 3000; // 3 seconds
+        const sampleInterval = 10; // 10ms
+        const saveStartTime = 1000; // Start saving at 1s
+        const saveEndTime = 2000; // Stop saving at 2s
 
         // Kampo skaičiavimo funkcija
         function calculateAngle(A, B, C) {
@@ -156,7 +391,7 @@
             } catch (error) {
                 console.error('Kameros klaida:', error);
                 permissionMessage.style.display = 'block';
-                angleDisplay.textContent = 'Klaida: Nepavyko pasiekti kameros';
+                angleText.textContent = 'Klaida: Nepavyko pasiekti kameros';
             }
         }
 
@@ -217,6 +452,120 @@
             });
         }
 
+        // Pradėti duomenų rinkimą
+        function startDataCollection() {
+            if (isCollectingData) return;
+            
+            collectedData = [];
+            isCollectingData = true;
+            collectionStartTime = Date.now();
+            startCollectionBtn.disabled = true;
+            downloadDataBtn.disabled = true;
+            collectionStatus.textContent = "Vyksta duomenų rinkimas...";
+            statusIndicator.classList.remove('status-active');
+            statusIndicator.classList.add('status-recording');
+            
+            // Atnaujinti progreso juostą
+            progressBar.style.width = '0%';
+            samplesCollected.textContent = `Išsaugotų mėginių: 0 (1-2s intervalas)`;
+            
+            // Pradėti duomenų rinkimą kas 10ms
+            collectionInterval = setInterval(updateDataCollection, sampleInterval);
+        }
+
+        // Atnaujinti duomenų rinkimą
+        function updateDataCollection() {
+            const currentTime = Date.now() - collectionStartTime;
+            const progressPercent = (currentTime / totalCollectionTime) * 100;
+            
+            progressBar.style.width = `${progressPercent}%`;
+            timeDisplay.textContent = `Įrašymo laikas: ${(currentTime / 1000).toFixed(1)}s / 3.0s`;
+            
+            // Sustabdyti jei pasiekėme maksimalų laiką
+            if (currentTime >= totalCollectionTime) {
+                stopDataCollection();
+                return;
+            }
+            
+            // Įrašyti duomenis tik jei esame norimame intervale (1-2s)
+            if (currentTime >= saveStartTime && currentTime <= saveEndTime) {
+                // Atnaujinti išsaugotų mėginių skaičių
+                samplesCollected.textContent = `Išsaugotų mėginių: ${collectedData.length} (1-2s intervalas)`;
+            }
+        }
+
+        // Sustabdyti duomenų rinkimą
+        function stopDataCollection() {
+            clearInterval(collectionInterval);
+            isCollectingData = false;
+            startCollectionBtn.disabled = false;
+            downloadDataBtn.disabled = collectedData.length === 0;
+            collectionStatus.textContent = "Duomenų rinkimas baigtas";
+            statusIndicator.classList.remove('status-recording');
+            statusIndicator.classList.add('status-active');
+            
+            // Rodyti pranešimą apie sėkmingą duomenų rinkimą
+            if (collectedData.length > 0) {
+                collectionStatus.textContent = `Duomenys sėkmingai surinkti! Išsaugota ${collectedData.length} mėginių`;
+            } else {
+                collectionStatus.textContent = "Duomenų rinkimas baigtas, bet nepavyko surinkti mėginių";
+            }
+        }
+
+        // Įrašyti duomenis
+        function recordData(landmarks, angle) {
+            if (!isCollectingData) return;
+            
+            const currentTime = Date.now() - collectionStartTime;
+            
+            // Įrašyti duomenis tik jei esame norimame intervale (1-2s)
+            if (currentTime >= saveStartTime && currentTime <= saveEndTime) {
+                const timestamp = Date.now();
+                const dataPoint = {
+                    timestamp,
+                    time: currentTime,
+                    angle,
+                    landmarks: {
+                        leftHip: {
+                            x: landmarks[LANDMARKS.LEFT_HIP].x,
+                            y: landmarks[LANDMARKS.LEFT_HIP].y
+                        },
+                        rightHip: {
+                            x: landmarks[LANDMARKS.RIGHT_HIP].x,
+                            y: landmarks[LANDMARKS.RIGHT_HIP].y
+                        },
+                        leftKnee: {
+                            x: landmarks[LANDMARKS.LEFT_KNEE].x,
+                            y: landmarks[LANDMARKS.LEFT_KNEE].y
+                        },
+                        rightKnee: {
+                            x: landmarks[LANDMARKS.RIGHT_KNEE].x,
+                            y: landmarks[LANDMARKS.RIGHT_KNEE].y
+                        }
+                    }
+                };
+                
+                collectedData.push(dataPoint);
+            }
+        }
+
+        // Atsisiųsti duomenis kaip JSON failą
+        function downloadData() {
+            if (collectedData.length === 0) return;
+            
+            const jsonData = JSON.stringify(collectedData, null, 2);
+            const blob = new Blob([jsonData], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `pose_data_${new Date().toISOString().replace(/:/g, '-')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
         // Pagrindinė aptikimo funkcija
         async function detectPose() {
             if (!poseLandmarker || !video.videoWidth) return;
@@ -233,10 +582,22 @@
                     const rightAngle = calculateAngle(rightHip, rightKnee, {x: rightHip.x, y: rightKnee.y});
                     const avgAngle = ((leftAngle + rightAngle) / 2).toFixed(1);
                     
-                    angleDisplay.textContent = `Kampas: ${avgAngle}°`;
+                    angleValue.textContent = `${avgAngle}°`;
+                    angleText.textContent = 'Kampas:';
+                    statusIndicator.classList.remove('status-inactive');
+                    statusIndicator.classList.add('status-active');
+                    
                     drawLandmarks(landmarks);
+                    
+                    // Įrašyti duomenis, jei vyksta rinkimas
+                    if (isCollectingData) {
+                        recordData(landmarks, parseFloat(avgAngle));
+                    }
                 } else {
-                    angleDisplay.textContent = 'Kampas: Nepavyko aptikti';
+                    angleValue.textContent = '-';
+                    angleText.textContent = 'Kampas: Nepavyko aptikti';
+                    statusIndicator.classList.remove('status-active', 'status-recording');
+                    statusIndicator.classList.add('status-inactive');
                     landmarkData.textContent = 'Palaukite, kol bus aptikta poza...';
                 }
             } catch (error) {
@@ -254,6 +615,8 @@
 
         // Event listeners
         retryButton.addEventListener('click', initCamera);
+        startCollectionBtn.addEventListener('click', startDataCollection);
+        downloadDataBtn.addEventListener('click', downloadData);
         
         document.addEventListener('DOMContentLoaded', () => {
             if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
